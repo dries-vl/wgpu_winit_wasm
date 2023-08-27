@@ -1,0 +1,23 @@
+[package]
+name = "webassembly"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+windowing = { path = "../../src/windowing" }
+winit = "0.28"
+
+console_error_panic_hook = "0.1.6"
+console_log = "1.0"
+log = "0.4.20"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4.30"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Window",
+    "Element",
+]}
+
