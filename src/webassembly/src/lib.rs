@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 use wgpu::Color;
+use wgpu::util::DeviceExt;
 
 #[cfg_attr(target_arch="wasm32", wasm_bindgen(start))]
 pub fn wasm_main() {
@@ -101,6 +102,40 @@ use winit::window::{Window, WindowBuilder};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)] // need bytemuck to cast to &[u8] for buffer
+struct Vertex {                                                  // Pod = plain old data = can convert to u8
+    position: [f32; 3],
+    color: [f32; 3],
+}
+
+impl Vertex {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress, // shader skips over this many bytes for next vertex
+            step_mode: wgpu::VertexStepMode::Vertex, // per-vertex <=> per-instance data
+            attributes: &[ // fields of vertex object
+                wgpu::VertexAttribute {
+                    offset: 0, // first in memory -> no jump required to get
+                    shader_location: 0, // corresponds to @location(0) some_name: vec3<f32>
+                    format: wgpu::VertexFormat::Float32x3, // corresponding shader format; FYI: MAX SIZE IS 32x4
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1, // corresponds to @location(1) some_name: vec3<f32>
+                    format: wgpu::VertexFormat::Float32x3,
+                }
+            ]
+        }
+    }
+}
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [0.0, 0.5, 0.0], color: [1.0, 0.0, 0.0] },
+    Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+    Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+];
+
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -110,6 +145,8 @@ struct State {
     window: Window,
     bg_color: Color,
     render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    num_vertices: u32,
 }
 
 impl State {
@@ -171,10 +208,58 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main", // function in shader that is entry point for vertex shader
+                buffers: &[Vertex::desc()], // data type of vertex buffer and description on how to handle the raw [u8]
+            },
+            fragment: Some(wgpu::FragmentState { // optional; needed to store color on surface
+                module: &shader,
+                entry_point: "fs_main", // function that is entry point for fragment shader
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format, // use surface config format
+                    blend: Some(wgpu::BlendState::REPLACE), // just overwrite color
+                    write_mask: wgpu::ColorWrites::ALL, // write to all colors:rgba,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList, // verts are automatically considered groups of triangles
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw, // clockwise for which is front of triangle
+                cull_mode: Some(wgpu::Face::Back), // cull if not front facing triangle
+                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // Requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1, // sampling; more than one for multisampling
+                mask: !0, // which samples are active
+                alpha_to_coverage_enabled: false, // anti-aliasing
+            },
+            multiview: None, // array texture stuff
         });
+
+        let vertex_buffer = device.create_buffer_init( // expects a &[u8] -> convert vertices
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
 
         Self {
             window,
@@ -184,6 +269,9 @@ impl State {
             config,
             size,
             bg_color: Color::BLACK,
+            render_pipeline,
+            vertex_buffer,
+            num_vertices: VERTICES.len() as u32,
         }
     }
 
@@ -226,7 +314,7 @@ impl State {
             label: Some("Render Encoder"),
         });
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -238,7 +326,15 @@ impl State {
                 })],
                 depth_stencil_attachment: None,
             });
+
+            // use the pipeline
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            // ids of vertices of instances -> @builtin(vertex_index)
+            render_pass.draw(0..self.num_vertices, 0..1); // DRAW CALL
+
         }
+
 
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
