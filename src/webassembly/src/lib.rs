@@ -1,4 +1,5 @@
 use wasm_bindgen::prelude::*;
+use wgpu::Color;
 
 #[cfg_attr(target_arch="wasm32", wasm_bindgen(start))]
 pub fn wasm_main() {
@@ -28,8 +29,7 @@ pub async fn run() {
     // web-specific logic
     #[cfg(target_arch = "wasm32")]
     {
-        #[cfg(wasm_platform)] // ide does not realize that this is the case, but needed for platform::web
-        use winit::platform::web::WindowExtWebSys;
+        use winit::platform::web::WindowExtWebSys; // ide doesnt realise platform is wasm; #[cfg(wasm_platform)]
         use winit::dpi::PhysicalSize;
         // winit prevents sizing with CSS, so we have to set the size manually when on web.
         window.set_inner_size(PhysicalSize::new(450, 400));
@@ -50,28 +50,30 @@ pub async fn run() {
 
     // start window event loop
     event_loop.run(move |event, _, control_flow| match event {
-        Event::WindowEvent {
-            ref event,
-            window_id,
-        } if window_id == state.window.id() => match event {
-            WindowEvent::CloseRequested | WindowEvent::KeyboardInput {
-                input:
-                KeyboardInput {
-                    state: ElementState::Pressed,
-                    virtual_keycode: Some(VirtualKeyCode::Escape),
-                    ..
-                },
-                ..
-            } => *control_flow = ControlFlow::Exit,
-            WindowEvent::Resized(physical_size) => {
-                state.resize(*physical_size);
+        Event::WindowEvent { ref event, window_id } if window_id == state.window().id() => {
+            if !state.input(event) {
+                match event {
+                    WindowEvent::CloseRequested
+                    | WindowEvent::KeyboardInput {
+                        input:
+                        KeyboardInput {
+                            state: ElementState::Pressed,
+                            virtual_keycode: Some(VirtualKeyCode::Escape),
+                            ..
+                        },
+                        ..
+                    } => *control_flow = ControlFlow::Exit,
+                    WindowEvent::Resized(physical_size) => {
+                        state.resize(*physical_size);
+                    }
+                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                        // new_inner_size is &mut so w have to dereference it twice
+                        state.resize(**new_inner_size);
+                    }
+                    _ => {}
+                }
             }
-            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                // new_inner_size is &&mut so we have to dereference it twice
-                state.resize(**new_inner_size);
-            },
-            _ => {}
-        },
+        }
         Event::RedrawRequested(window_id) if window_id == state.window.id() => {
             state.update();
             match state.render() {
@@ -106,6 +108,8 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     window: Window,
+    bg_color: Color,
+    render_pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
@@ -166,6 +170,12 @@ impl State {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        });
+
         Self {
             window,
             surface,
@@ -173,6 +183,7 @@ impl State {
             queue,
             config,
             size,
+            bg_color: Color::BLACK,
         }
     }
 
@@ -190,7 +201,18 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        false
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                self.bg_color = wgpu::Color {
+                    r: position.x as f64 / self.size.width as f64,
+                    g: position.y as f64 / self.size.height as f64,
+                    b: 1.0,
+                    a: 1.0,
+                };
+                true
+            }
+            _ => false
+        }
     }
 
     fn update(&mut self) {
@@ -210,12 +232,7 @@ impl State {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.bg_color),
                         store: true,
                     },
                 })],
