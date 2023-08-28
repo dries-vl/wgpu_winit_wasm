@@ -6,9 +6,11 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src/webassembly/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src/windowing/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/src/windowing/tsnt/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/src/webassembly/target" />
       <excludeFolder url="file://$MODULE_DIR$/src/windowing/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
+      <excludeFolder url="file://$MODULE_DIR$/src/windowing/tsnt/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
