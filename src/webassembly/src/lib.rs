@@ -131,9 +131,17 @@ impl Vertex {
 }
 
 const VERTICES: &[Vertex] = &[
-    Vertex { position: [0.0, 0.5, 0.0], color: [1.0, 0.0, 0.0] },
-    Vertex { position: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
-    Vertex { position: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [0.5, 0.0, 0.5] }, // 0
+    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.5, 0.0, 0.5] }, // 1
+    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.5, 0.0, 0.5] }, // 2
+    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.5, 0.0, 0.5] }, // 3
+    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.5, 0.0, 0.5] }, // 4
+];
+
+const INDICES: &[u16] = &[
+    0, 1, 4,
+    1, 2, 4,
+    2, 3, 4,
 ];
 
 struct State {
@@ -146,7 +154,8 @@ struct State {
     bg_color: Color,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    num_vertices: u32,
+    index_buffer: wgpu::Buffer,
+    num_indices: u32,
 }
 
 impl State {
@@ -220,12 +229,12 @@ impl State {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main", // function in shader that is entry point for vertex shader
+                entry_point: "vertex", // function in shader that is entry point for vertex shader
                 buffers: &[Vertex::desc()], // data type of vertex buffer and description on how to handle the raw [u8]
             },
             fragment: Some(wgpu::FragmentState { // optional; needed to store color on surface
                 module: &shader,
-                entry_point: "fs_main", // function that is entry point for fragment shader
+                entry_point: "fragment", // function that is entry point for fragment shader
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format, // use surface config format
                     blend: Some(wgpu::BlendState::REPLACE), // just overwrite color
@@ -261,6 +270,14 @@ impl State {
             }
         );
 
+        let index_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(INDICES),
+                usage: wgpu::BufferUsages::INDEX,
+            }
+        );
+
         Self {
             window,
             surface,
@@ -271,7 +288,8 @@ impl State {
             bg_color: Color::BLACK,
             render_pipeline,
             vertex_buffer,
-            num_vertices: VERTICES.len() as u32,
+            index_buffer,
+            num_indices: INDICES.len() as u32,
         }
     }
 
@@ -330,8 +348,9 @@ impl State {
             // use the pipeline
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             // ids of vertices of instances -> @builtin(vertex_index)
-            render_pass.draw(0..self.num_vertices, 0..1); // DRAW CALL
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..1); // DRAW CALL
 
         }
 
