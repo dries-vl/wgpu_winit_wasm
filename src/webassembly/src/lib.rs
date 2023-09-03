@@ -360,7 +360,7 @@ impl State {
                 // WebGL doesn't support all of wgpu's features, so if
                 // we're building for the web we'll have to disable some.
                 limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
+                    wgpu::Limits::default() // use webgl downlevel defaults for webgl support
                 } else {
                     wgpu::Limits::default()
                 },
@@ -368,6 +368,7 @@ impl State {
             },
             None, // Trace path
         ).await.unwrap();
+
         let surface_caps = surface.get_capabilities(&adapter);
         // Shader code in this tutorial assumes an sRGB surface texture. Using a different
         // one will result all the colors coming out darker. If you want to support non
@@ -653,8 +654,8 @@ impl State {
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let output = self.surface.get_current_texture()?; // texture on the surface we will draw to
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default()); // view description; default
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render Encoder"),
         });
