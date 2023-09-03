@@ -1,10 +1,16 @@
-mod texture;
-
-use std::iter::once;
+use cgmath::prelude::*;
 use wasm_bindgen::prelude::*;
 use wgpu::Color;
 use wgpu::util::DeviceExt;
-use cgmath::prelude::*;
+use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::{Window, WindowBuilder};
+
+use crate::model::Vertex;
+
+mod texture;
+mod model;
+mod resources;
 
 #[cfg_attr(target_arch="wasm32", wasm_bindgen(start))]
 pub fn wasm_main() {
@@ -100,53 +106,6 @@ pub async fn run() {
     });
 }
 
-
-// lib.rs
-use winit::window::{Window, WindowBuilder};
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)] // need bytemuck to cast to &[u8] for buffer
-struct Vertex {                                                  // Pod = plain old data = can convert to u8
-    position: [f32; 3],
-    tex_coords: [f32; 2]
-}
-
-impl Vertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress, // shader skips over this many bytes for next vertex
-            step_mode: wgpu::VertexStepMode::Vertex, // per-vertex <=> per-instance data
-            attributes: &[ // fields of vertex object
-                wgpu::VertexAttribute {
-                    offset: 0, // first in memory -> no jump required to get
-                    shader_location: 0, // corresponds to @location(0) some_name: vec3<f32>
-                    format: wgpu::VertexFormat::Float32x3, // corresponding shader format; FYI: MAX SIZE IS 32x4
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress, // offset as in jump over the previous elements
-                    shader_location: 1, // corresponds to @location(1) some_name: vec3<f32>
-                    format: wgpu::VertexFormat::Float32x2,
-                }
-            ]
-        }
-    }
-}
-
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], }, // 0
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // 1
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // 2
-    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // 3
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // 4
-];
-
-const INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
-];
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
@@ -345,10 +304,6 @@ impl InstanceRaw {
     }
 }
 
-// instances to display and their relative positions
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
-
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -358,9 +313,6 @@ struct State {
     window: Window,
     bg_color: Color,
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer, // later additions in tutorials from here
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
     camera: Camera,
@@ -371,6 +323,7 @@ struct State {
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
+    obj_model: model::Model,
 }
 
 impl State {
@@ -538,13 +491,17 @@ impl State {
         // endregion: --- CAMERA
 
         // region: --- INSTANCES
+        // instances to display and their relative positions
+        const NUM_INSTANCES_PER_ROW: u32 = 10;
+        const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|z| {
             (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                let position = cgmath::Vector3 { x: x as f32, y: 0.0, z: z as f32 } - INSTANCE_DISPLACEMENT;
+                let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                let position = cgmath::Vector3 { x, y: 0.0, z };
 
                 let rotation = if position.is_zero() {
-                    // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                    // as Quaternions can effect scale if they're not created correctly
                     cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
                 } else {
                     cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
@@ -583,7 +540,7 @@ impl State {
                 module: &shader,
                 entry_point: "vertex", // function in shader that is entry point for vertex shader
                 buffers: &[
-                    Vertex::desc(), // description of vertex buffer and description on how to handle the raw [u8]
+                    model::ModelVertex::desc(), // description of vertex buffer and description on how to handle the raw [u8]
                     InstanceRaw::desc(), // description of instances of this vertex buffer
                 ],
             },
@@ -624,28 +581,16 @@ impl State {
         });
         // endregion: --- SHADER AND PIPELINE
 
-        // region: --- BUFFERS
-        // tutorial 2; not strictly needed to work
-        let vertex_buffer = device.create_buffer_init( // expects a &[u8] -> convert vertices
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
-
-        let index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
-        // endregion: --- BUFFERS
-
         // region: --- DEPTH
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
         // endregion: --- DEPTH
+
+        // region: --- models
+        let obj_model =
+            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+                .await
+                .unwrap();
+        // endregion: --- models
 
         Self {
             window,
@@ -656,9 +601,6 @@ impl State {
             size,
             bg_color: Color::BLACK,
             render_pipeline,
-            vertex_buffer,
-            index_buffer,
-            num_indices: INDICES.len() as u32,
             diffuse_bind_group,
             diffuse_texture,
             camera,
@@ -669,6 +611,7 @@ impl State {
             instances,
             instance_buffer,
             depth_texture,
+            obj_model,
         }
     }
 
@@ -737,17 +680,17 @@ impl State {
             });
 
             // use the pipeline
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // tutorial 5
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]); // tutorial 3
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]); // tutorial 4
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..)); // tutorial 2
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // tutorial 5
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // tutorial 2
-            // ids of vertices of instances -> @builtin(vertex_index)
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _); // DRAW CALL
+
+            use model::DrawModel;
+            let mesh = &self.obj_model.meshes[0];
+            let material = &self.obj_model.materials[mesh.material];
+            render_pass.draw_mesh_instanced(mesh, material, 0..self.instances.len() as u32, &self.camera_bind_group);
 
         }
-
 
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -12,9 +12,10 @@ bytemuck = { version = "1.13", features = ["derive"]}
 cfg-if = "1"
 winit = { version = "0.28" }
 wgpu = { version = "0.17" }
-image = { version = "0.24", default-features = false, features = ["png", "jpeg"] } # jpeg uses rayon; wasm issue
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] } # jpeg uses rayon -> wasm issue
 anyhow = "1.0" # error handling
 cgmath = "0.18" # math for 3d stuff
+tobj = { version = "3.2.1", features = [ "async", ]} # loading .obj files
 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -27,5 +28,14 @@ web-sys = { version = "0.3", features = [
     "Document",
     "Window",
     "Element",
+    "Location",
 ]}
+reqwest = { version = "0.11" }
+getrandom = { version = "0.2.10", features = ["js"]} # new dependency crashes for wasm and needs this js feature here
+
+[build-dependencies]
+anyhow = "1.0"
+fs_extra = "1.2"
+glob = "0.3"
+
 
