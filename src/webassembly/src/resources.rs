@@ -1,31 +1,46 @@
 use std::io::{BufReader, Cursor};
 
 use cfg_if::cfg_if;
+use wasm_bindgen_futures::JsFuture;
 use wgpu::util::DeviceExt;
 
 use crate::{model, texture};
 
+#[derive(Debug)]
+pub enum ResourceError {
+    TextureError(texture::TextureError),
+    LoadError(tobj::LoadError),
+}
+
 #[cfg(target_arch = "wasm32")]
 // serve files as a local webserver and make http requests to get them
-fn format_url(file_name: &str) -> reqwest::Url {
+fn format_url(file_name: &str) -> String {
     let window = web_sys::window().unwrap();
     let location = window.location();
     let mut origin = location.origin().unwrap();
     if !origin.ends_with("wgpu_winit/src/webassembly/res") {
         origin = format!("{}/wgpu_winit/src/webassembly/res", origin);
     }
-    let base = reqwest::Url::parse(&format!("{}/", origin,)).unwrap();
-    base.join(file_name).unwrap()
+    format!("{}/{}", origin, file_name)
 }
 
-pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
+pub async fn load_string(file_name: &str) -> String {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(file_name);
-            let txt = reqwest::get(url)
-                .await?
-                .text()
-                .await?;
+            let window = web_sys::window().unwrap();
+            let fetch_promise = window.fetch_with_str(&url);
+
+            let js_future = JsFuture::from(fetch_promise);
+            let result = js_future.await.unwrap();
+
+            use wasm_bindgen::JsCast;
+            let response: web_sys::Response = result.dyn_into().unwrap();
+            let text_promise = response.text().unwrap();
+
+            let js_future = JsFuture::from(text_promise);
+            let txt: String = js_future.await.unwrap().as_string().unwrap();
+
         } else {
             let path = std::path::Path::new(env!("OUT_DIR"))
                 .join("res")
@@ -34,18 +49,30 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
         }
     }
 
-    Ok(txt)
+    txt
 }
 
-pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
+pub async fn load_binary(file_name: &str) -> Vec<u8> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(file_name);
-            let data = reqwest::get(url)
-                .await?
-                .bytes()
-                .await?
-                .to_vec();
+            let window = web_sys::window().unwrap();
+            let fetch_promise = window.fetch_with_str(&url);
+
+            let js_future = JsFuture::from(fetch_promise);
+            let result = js_future.await.unwrap();
+
+            use wasm_bindgen::JsCast;
+            let response: web_sys::Response = result.dyn_into().unwrap();
+            let array_buffer_promise = response.array_buffer().unwrap();
+
+            let js_future = JsFuture::from(array_buffer_promise);
+            let array_buffer: js_sys::ArrayBuffer = js_future.await.unwrap().dyn_into().unwrap();
+
+            let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+            let mut data = vec![0; uint8_array.length() as usize];
+            uint8_array.copy_to(&mut data);
+
         } else {
             let path = std::path::Path::new(env!("OUT_DIR"))
                 .join("res")
@@ -54,15 +81,15 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
         }
     }
 
-    Ok(data)
+    data
 }
 
 pub async fn load_texture(
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> anyhow::Result<texture::Texture> {
-    let data = load_binary(file_name).await?;
+) -> Result<texture::Texture, texture::TextureError> {
+    let data = load_binary(file_name).await;
     texture::Texture::from_bytes(device, queue, &data, file_name)
 }
 
@@ -70,9 +97,9 @@ pub async fn load_model(
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<model::Model> {
-    let obj_text = load_string(file_name).await?;
+    layout: &wgpu::BindGroupLayout) -> Result<model::Model, ResourceError>
+{
+    let obj_text = load_string(file_name).await;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
@@ -84,15 +111,18 @@ pub async fn load_model(
             ..Default::default()
         },
         |p| async move {
-            let mat_text = load_string(&p).await.unwrap();
+            let mat_text = load_string(&p).await;
             tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
         },
     )
-        .await?;
+        .await
+        .map_err(|e| ResourceError::LoadError(e))?;
 
     let mut materials = Vec::new();
-    for m in obj_materials? {
-        let diffuse_texture = load_texture(&m.diffuse_texture, device, queue).await?;
+    for m in obj_materials.map_err(|e| ResourceError::LoadError(e))? {
+        let diffuse_texture = load_texture(&m.diffuse_texture, device, queue)
+            .await
+            .map_err(|e| ResourceError::TextureError(e)).unwrap();
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout,
             entries: &[

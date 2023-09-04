@@ -1,5 +1,9 @@
-use image::GenericImageView;
-use anyhow::*;
+use image::{GenericImageView};
+
+#[derive(Debug)]
+pub enum TextureError {
+    ImageError(image::ImageError), // load_from_memory() -> ImageError -> map_err -> TextureError -> ? operator
+}
 
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -12,9 +16,10 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bytes: &[u8],
-        label: &str) -> Result<Self>
+        label: &str) -> Result<Self, TextureError>
     {
-        let img = image::load_from_memory(bytes)?;
+        let img = image::load_from_memory(bytes)
+            .map_err(|e| TextureError::ImageError(e))?;
         Self::from_image(device, queue, &img, Some(label))
     }
 
@@ -22,7 +27,7 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         img: &image::DynamicImage,
-        label: Option<&str>) -> Result<Self>
+        label: Option<&str>) -> Result<Self, TextureError>
     {
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();

@@ -1,4 +1,4 @@
-use cgmath::prelude::*;
+use cgmath::{InnerSpace, Rotation3, Zero};
 use wasm_bindgen::prelude::*;
 use wgpu::Color;
 use wgpu::util::DeviceExt;
@@ -214,7 +214,6 @@ impl CameraController {
     }
 
     fn update_camera(&self, camera: &mut Camera) {
-        use cgmath::InnerSpace;
         let forward = camera.target - camera.eye;
         let forward_norm = forward.normalize();
         let forward_mag = forward.magnitude();
@@ -330,7 +329,7 @@ impl State {
     // Creating some of the wgpu types requires async code
     async fn new(window: Window) -> Self {
 
-        /// region: --- SETUP
+        // region: --- SETUP
         let size = window.inner_size();
 
         // The instance is a handle to our GPU
@@ -387,9 +386,9 @@ impl State {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
-        /// endregion: --- SETUP
+        // endregion: --- SETUP
 
-        /// region: --- TEXTURES
+        // region: --- TEXTURES
         // tutorial 3; not strictly needed to work
         let diffuse_bytes = include_bytes!("happy-tree.png"); // CHANGED!
         let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap(); // CHANGED!
@@ -436,7 +435,7 @@ impl State {
             }
         );
 
-        /// endregion: --- TEXTURES
+        // endregion: --- TEXTURES
 
         // region: --- CAMERA
         let camera = Camera {
