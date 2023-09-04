@@ -1,4 +1,3 @@
-use cgmath::{InnerSpace, Rotation3, Zero};
 use wasm_bindgen::prelude::*;
 use wgpu::Color;
 use wgpu::util::DeviceExt;
@@ -108,12 +107,12 @@ pub async fn run() {
 
 
 #[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+pub const OPENGL_TO_WGPU_MATRIX: glam::Mat4 = glam::Mat4::from_cols_array(&[
     1.0, 0.0, 0.0, 0.0,
     0.0, 1.0, 0.0, 0.0,
     0.0, 0.0, 0.5, 0.5,
     0.0, 0.0, 0.0, 1.0,
-);
+]);
 
 // This is so we can store this in a buffer
 #[repr(C)]
@@ -126,21 +125,20 @@ struct CameraUniform {
 
 impl CameraUniform {
     fn new() -> Self {
-        use cgmath::SquareMatrix;
         Self {
-            view_proj: cgmath::Matrix4::identity().into(),
+            view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
         }
     }
 
     fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+        self.view_proj = camera.build_view_projection_matrix().to_cols_array_2d();
     }
 }
 
 struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
+    eye: glam::Vec3,
+    target: glam::Vec3,
+    up: glam::Vec3,
     aspect: f32,
     fovy: f32,
     znear: f32,
@@ -148,11 +146,11 @@ struct Camera {
 }
 
 impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+    fn build_view_projection_matrix(&self) -> glam::Mat4  {
         // 1.
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        let view = glam::Mat4 ::look_at_rh(self.eye, self.target, self.up);
         // 2.
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+        let proj = glam::Mat4::perspective_rh_gl(self.fovy.to_radians(), self.aspect, self.znear, self.zfar);
 
         // 3.
         return OPENGL_TO_WGPU_MATRIX * proj * view;
@@ -216,7 +214,7 @@ impl CameraController {
     fn update_camera(&self, camera: &mut Camera) {
         let forward = camera.target - camera.eye;
         let forward_norm = forward.normalize();
-        let forward_mag = forward.magnitude();
+        let forward_mag = forward.length();
 
         // Prevents glitching when camera gets too close to the
         // center of the scene.
@@ -229,9 +227,9 @@ impl CameraController {
 
         let right = forward_norm.cross(camera.up);
 
-        // Redo radius calc in case the fowrard/backward is pressed.
+        // Redo radius calc in case the forward/backward is pressed.
         let forward = camera.target - camera.eye;
-        let forward_mag = forward.magnitude();
+        let forward_mag = forward.length();
 
         if self.is_right_pressed {
             // Rescale the distance between the target and eye so
@@ -246,14 +244,21 @@ impl CameraController {
 }
 
 struct Instance { // actual rotation and position
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
+    position: glam::Vec3,
+    rotation: glam::Quat,
 }
 
 impl Instance {
     fn to_raw(&self) -> InstanceRaw {
+        // Build the model matrix by combining translation and rotation
+        let translation_matrix = glam::Mat4::from_translation(self.position);
+        let rotation_matrix = glam::Mat4::from_quat(self.rotation);
+
+        let model_matrix = translation_matrix * rotation_matrix;
+
+        // Convert the model matrix to the InstanceRaw representation
         InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into(),
+            model: model_matrix.to_cols_array_2d(),
         }
     }
 }
@@ -321,8 +326,10 @@ struct State {
     camera_controller: CameraController,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
+    vertex_buffer: wgpu::Buffer, // later additions in tutorials from here
+    index_buffer: wgpu::Buffer,
+    num_indices: u32,
     depth_texture: texture::Texture,
-    obj_model: model::Model,
 }
 
 impl State {
@@ -391,7 +398,7 @@ impl State {
         // region: --- TEXTURES
         // tutorial 3; not strictly needed to work
         let diffuse_bytes = include_bytes!("happy-tree.png"); // CHANGED!
-        let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap(); // CHANGED!
+        let diffuse_texture = texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap();
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -445,7 +452,7 @@ impl State {
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
-            up: cgmath::Vector3::unit_y(),
+            up: glam::Vec3::new(0.0, 1.0, 0.0),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
             znear: 0.1,
@@ -499,12 +506,12 @@ impl State {
                 let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
                 let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
 
-                let position = cgmath::Vector3 { x, y: 0.0, z };
+                let position = glam::Vec3 { x, y: 0.0, z };
 
-                let rotation = if position.is_zero() {
-                    cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+                let rotation = if position.length() == 0.0 {
+                    glam::Quat::from_rotation_z(0.0)
                 } else {
-                    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    glam::Quat::from_axis_angle(position.normalize(), 45.0_f32.to_radians())
                 };
 
                 Instance {
@@ -540,7 +547,7 @@ impl State {
                 module: &shader,
                 entry_point: "vertex", // function in shader that is entry point for vertex shader
                 buffers: &[
-                    model::ModelVertex::desc(), // description of vertex buffer and description on how to handle the raw [u8]
+                    model::BasicVertex::desc(), // description of vertex buffer and description on how to handle the raw [u8]
                     InstanceRaw::desc(), // description of instances of this vertex buffer
                 ],
             },
@@ -585,11 +592,31 @@ impl State {
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
         // endregion: --- DEPTH
 
+        // region: --- BUFFERS
+        // tutorial 2; not strictly needed to work
+        let vertex_buffer = device.create_buffer_init( // expects a &[u8] -> convert vertices
+                                                       &wgpu::util::BufferInitDescriptor {
+                                                           label: Some("Vertex Buffer"),
+                                                           contents: bytemuck::cast_slice(model::VERTICES),
+                                                           usage: wgpu::BufferUsages::VERTEX,
+                                                       }
+        );
+
+        let index_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(model::INDICES),
+                usage: wgpu::BufferUsages::INDEX,
+            }
+        );
+        // endregion: --- BUFFERS
+
+
         // region: --- MODELS
-        let obj_model =
-            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
+        // let obj_model =
+        //     resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+        //         .await
+        //         .unwrap();
         // endregion: --- MODELS
 
         Self {
@@ -610,8 +637,10 @@ impl State {
             camera_controller: CameraController::new(0.2),
             instances,
             instance_buffer,
+            vertex_buffer, // later additions in tutorials from here
+            index_buffer,
+            num_indices: model::INDICES.len() as u32,
             depth_texture,
-            obj_model,
         }
     }
 
@@ -680,15 +709,14 @@ impl State {
             });
 
             // use the pipeline
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // tutorial 5
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]); // tutorial 3
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]); // tutorial 4
-
-            use model::DrawModel;
-            let mesh = &self.obj_model.meshes[0];
-            let material = &self.obj_model.materials[mesh.material];
-            render_pass.draw_mesh_instanced(mesh, material, 0..self.instances.len() as u32, &self.camera_bind_group);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..)); // tutorial 2
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..)); // tutorial 5
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); // tutorial 2
+            // ids of vertices of instances -> @builtin(vertex_index)
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _); // DRAW CALL
 
         }
 

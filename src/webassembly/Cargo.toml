@@ -12,10 +12,8 @@ bytemuck = { version = "1.13", features = ["derive"]}
 cfg-if = "1"
 winit = { version = "0.28" }
 wgpu = { version = "0.17" }
-image = { version = "0.24", default-features = false, features = ["png", "jpeg"] } # jpeg uses rayon -> wasm issue
-cgmath = "0.18" # math for 3d stuff     # is glam more lighweight?
-tobj = { version = "3.2.1", features = [ "async", ]} # loading .obj files
-
+png = "0.17.10"
+glam = "0.24"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.6"
@@ -31,7 +29,6 @@ web-sys = { version = "0.3", features = [
     "Response",
 ]}
 js-sys = "0.3"
-getrandom = { version = "0.2.10", features = ["js"]} # new dependency crashes for wasm and needs this js feature here
 
 [build-dependencies]
 anyhow = "1.0"
