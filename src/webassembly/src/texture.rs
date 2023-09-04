@@ -12,8 +12,8 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bytes: &[u8],
-        label: &str
-    ) -> Result<Self> {
+        label: &str) -> Result<Self>
+    {
         let img = image::load_from_memory(bytes)?;
         Self::from_image(device, queue, &img, Some(label))
     }
@@ -22,8 +22,8 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         img: &image::DynamicImage,
-        label: Option<&str>
-    ) -> Result<Self> {
+        label: Option<&str>) -> Result<Self>
+    {
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();
 
@@ -32,6 +32,7 @@ impl Texture {
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
+
         let texture = device.create_texture(
             &wgpu::TextureDescriptor {
                 label,

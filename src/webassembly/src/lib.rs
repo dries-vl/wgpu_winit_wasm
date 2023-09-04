@@ -531,7 +531,7 @@ impl State {
                 bind_group_layouts: &[
                     &texture_bind_group_layout, // add texture to pipeline at group 0
                     &camera_bind_group_layout, // add camera to pipeline at group 1
-                ], // inform pipeline of layout of textures; can be empty array if no textures
+                ], // inform pipeline of layout of bind groups; can be empty array
                 push_constant_ranges: &[],
             });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -586,12 +586,12 @@ impl State {
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
         // endregion: --- DEPTH
 
-        // region: --- models
+        // region: --- MODELS
         let obj_model =
             resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
                 .await
                 .unwrap();
-        // endregion: --- models
+        // endregion: --- MODELS
 
         Self {
             window,
