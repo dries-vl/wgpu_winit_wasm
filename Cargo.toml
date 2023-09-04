@@ -5,4 +5,10 @@ edition = "2021"
 
 [dependencies]
 env_logger = "0.10"
-winit = "0.28"
+pollster = "0.3"
+bytemuck = { version = "1.13", features = ["derive"]}
+cfg-if = "1"
+winit = { version = "0.28" }
+wgpu = { version = "0.17" }
+png = "0.17.10"
+glam = "0.24"

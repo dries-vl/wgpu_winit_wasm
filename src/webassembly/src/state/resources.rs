@@ -1,7 +1,8 @@
 use cfg_if::cfg_if;
-use wasm_bindgen_futures::JsFuture;
+use crate::state::texture;
 
-use crate::texture;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
 
 #[derive(Debug)]
 pub enum ResourceError {
@@ -41,7 +42,7 @@ pub async fn load_string(file_name: &str) -> String {
             let path = std::path::Path::new(env!("OUT_DIR"))
                 .join("res")
                 .join(file_name);
-            let txt = std::fs::read_to_string(path)?;
+            let txt = std::fs::read_to_string(path).unwrap();
         }
     }
 
@@ -73,7 +74,7 @@ pub async fn load_binary(file_name: &str) -> Vec<u8> {
             let path = std::path::Path::new(env!("OUT_DIR"))
                 .join("res")
                 .join(file_name);
-            let data = std::fs::read(path)?;
+            let data = std::fs::read(path).unwrap();
         }
     }
 
