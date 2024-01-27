@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+webassembly = { path = "src/webassembly"}
 env_logger = "0.10"
 pollster = "0.3"
 bytemuck = { version = "1.13", features = ["derive"]}
@@ -12,3 +13,4 @@ winit = { version = "0.28" }
 wgpu = { version = "0.17" }
 png = "0.17.10"
 glam = "0.24"
+

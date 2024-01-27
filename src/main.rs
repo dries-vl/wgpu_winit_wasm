@@ -1,9 +1,8 @@
-use wgpu::util::DeviceExt;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-mod state;
+use webassembly::state as state;
 
 fn main() {
     // run
