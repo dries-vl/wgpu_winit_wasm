@@ -41,13 +41,15 @@ impl State {
 
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
+        use std::time::Instant;
+        let timer = Instant::now();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             dx12_shader_compiler: Default::default(),
         });
+        println!("Acquiring GPU instance: {:?}", timer.elapsed());
 
         // # Safety
-        //
         // The surface needs to live as long as the window that created it.
         // State owns the window so this should be safe.
         let surface = unsafe { instance.create_surface(&window) }.unwrap();
@@ -63,13 +65,7 @@ impl State {
         let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
                 features: wgpu::Features::empty(),
-                // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
-                limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::default() // use webgl downlevel defaults for webgl support
-                } else {
-                    wgpu::Limits::default()
-                },
+                limits: wgpu::Limits::default(),
                 label: None,
             },
             None, // Trace path
